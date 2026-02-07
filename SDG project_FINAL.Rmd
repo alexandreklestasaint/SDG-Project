@@ -1,0 +1,680 @@
+---
+title: "SDG Project - Alexandre et Keyhan"
+author: "Alexandre SAINT"
+date: "2025-09-24"
+output: html_document
+---
+
+# Initialisation
+
+```{r setup, include=FALSE}
+
+# Installation / chargement des packages
+#install.packages("pacman")
+library(pacman)
+p_load(tidyverse, plm, WDI, readxl, writexl, skimr, naniar, broom, stargazer, GGally, lmtest, tseries, sandwich)
+
+# Paramétrage du dossier source
+setwd("C:/Users/alexa/Documents/Cours Dauphine/Programming with application to SDGs/Projet de R")
+getwd()
+
+```
+
+# Construction du dataset
+
+## Importation des données polity2 (Banque Mondiale)
+
+```{r import polity2}
+
+# Importation de la base de données polity2
+
+polity2 <- read_csv("POLITY5_PRC_POLITY2.csv")
+
+head(polity2)
+
+## Sélection des variables d'intérêt
+## Mise au format num des années
+
+polity2 <- polity2 %>% 
+  transmute(Time = as.integer(TIME_PERIOD),
+            country = REF_AREA,
+            country_name = REF_AREA_LABEL,
+            democracy = OBS_VALUE)
+
+## Rapide coup d'oeil sur les variables
+
+head(polity2)
+glimpse(polity2)
+skim(polity2 %>% select(-Time))
+polity2$democracy %>% unique %>% sort
+
+## Exclusion des valeurs absurdes pour la variable "democracy"
+
+polity2 <- polity2 %>% filter(!democracy %in% c(-66, -77, -88))
+polity2$democracy %>% unique %>% sort
+
+```
+
+## Importation des données WDI (Banque Mondiale)
+
+```{r import wdi}
+
+#  Importation de la base de données wdi
+
+wdi <- read_excel("world_development_indicators.xlsx", na = c("..", ""))
+
+head(wdi)
+
+# Renommage des variables et passage en log des variables d'intérêt
+
+wdi <- wdi %>%
+  rename(country = 2, GDP = 11, CO2 = 10, oil = 9, corruption = 8, 
+         renewable = 7,industry = 6,urban_pop = 5, rule_of_law = 12) %>%
+  select(-c(1, 4)) %>%
+  mutate(logCO2 = log(CO2),
+         logGDP = log(GDP),
+         logGDP2 = logGDP^2,
+         logGDP3 = logGDP^3) %>%
+  select(country, Time, CO2, logCO2, GDP, logGDP, logGDP2, logGDP3, 
+         renewable, oil, industry, corruption, urban_pop, rule_of_law)
+
+skim(wdi)
+gg_miss_var(wdi)
+
+wdi_na <- wdi %>% 
+  group_by(Time) %>% 
+  summarise(na_CO2 = sum(is.na(CO2)),
+            na_GDP = sum(is.na(GDP)),
+            na_renewable = sum(is.na(renewable)),
+            na_oil = sum(is.na(oil)),
+            na_industry = sum(is.na(industry)),
+            na_corruption = sum(is.na(corruption)),
+            na_rule_of_law = sum(is.na(rule_of_law)),
+            urban_pop = sum(is.na(urban_pop))) %>%
+  mutate(all = na_CO2 + na_GDP + na_renewable + na_oil + 
+           na_industry + na_corruption + na_rule_of_law + urban_pop) %>%
+  relocate(all, .before = na_CO2) %>% 
+  arrange(Time)
+
+######## Filtrage des années : trop de NA avgeom_bar()######## Filtrage des années : trop de NA avant 2000
+
+wdi_na %>% ggplot(aes(x = Time, y = all)) + geom_col()
+
+wdi <- wdi %>% filter(Time>=2000 & Time<=2018)
+
+```
+
+## Ajout de la variable "democracy" à la base WDI
+
+```{r}
+
+wdi$country %>% unique %>% length
+polity2$country %>% unique %>% length
+
+## inner join permet retire les NA dans la variable democracy produits par le left join
+wdi_with_democracy <- wdi %>%
+  inner_join(polity2, by = c("country", "Time")) %>%
+  relocate(democracy, .after = country)
+
+## Rapide check des NA post join
+head(wdi_with_democracy)
+skim(wdi_with_democracy)
+gg_miss_var(wdi_with_democracy)
+
+######## Filtrage des années : trop de NA avant 2000
+
+wdi_with_democracy <- wdi_with_democracy %>%
+  filter(Time>=2000 & Time<=2018)
+
+wdi_with_democracy$country %>% unique %>% length
+
+```
+
+## Séparation du dataset en 3 catégories de régimes
+
+```{r}
+
+wdi_with_democracy <- wdi_with_democracy %>% 
+  mutate(regime_ = case_when(
+    democracy >= -10 & democracy <= -6 ~ "autocracy",
+    democracy >= -5 & democracy <= 5 ~ "anocracy",
+    democracy >= 6 & democracy <= 10 ~ "democracy",
+    )
+  ) %>% 
+  mutate(regime_ = factor(regime_, 
+                          levels = c("democracy", 
+                                     "anocracy", 
+                                     "autocracy"))) %>% 
+  relocate(regime_, .after = democracy)
+
+wdi_democracy <- wdi_with_democracy %>% filter(regime_ == "democracy")
+wdi_anocracy <- wdi_with_democracy %>% filter(regime_ == "anocracy")
+wdi_autocracy <- wdi_with_democracy %>% filter(regime_ == "autocracy")
+
+```
+
+# EDA
+
+## EDA sur wdi
+
+```{r EDA on WDI}
+
+
+skim(wdi)
+gg_miss_var(wdi)
+na.omit(wdi) %>% pluck("Time") %>% unique %>% sort
+
+wdi %>% ggplot(aes(x = Time, y = GDP)) + geom_point()
+wdi %>% ggplot(aes(x = Time, y = CO2)) + geom_point()
+wdi %>% ggplot(aes(x = CO2, y = GDP)) + geom_point()
+wdi %>% ggplot(aes(x = CO2, y = logGDP)) + geom_point()
+wdi %>% ggplot(aes(y = logCO2, x = logGDP)) + geom_point()
+
+corr_vars <- c("logCO2", "logGDP", "renewable","oil","industry",
+               "urban_pop","rule_of_law", "corruption")
+
+wdi_corr <- wdi %>% select(corr_vars) %>%
+  drop_na()  # corrélation sur cas complets
+
+## Matrice correlation globale (sur variables sélectionnées)
+GGally::ggcorr(wdi_corr,
+  method = c("complete","pearson"),
+  nbreaks = NULL, digits = 3,
+  low = "blue", mid = "white", high = "red",
+  geom = "tile", label = TRUE, label_alpha = FALSE
+)
+
+
+```
+
+## EDA sur wdi_democracy
+
+```{r}
+
+## Matrice corrélation démocratie
+wdi_corr <- wdi_democracy %>%
+  mutate(lCO2 = log(CO2), lGDP = log(GDP)) %>%
+  select(lCO2, lGDP, all_of(corr_vars)) %>%
+  drop_na()   # corrélation sur cas complets
+
+corr_vars <- c("logCO2", "logGDP", "renewable","oil","industry",
+               "urban_pop","rule_of_law", "corruption")
+
+wdi_democracy_corr <- wdi_democracy %>% 
+  select(corr_vars) %>%
+  drop_na() 
+  
+  GGally::ggcorr(wdi_democracy_corr,
+  method = c("complete","pearson"),
+  nbreaks = NULL, digits = 3,
+  low = "blue", mid = "white", high = "red",
+  geom = "tile", label = TRUE, label_alpha = FALSE
+)
+  
+wdi_democracy_corr %>% ggplot(aes(y = logCO2, x = logGDP)) + geom_point()
+
+```
+
+## EDA sur wdi_anocracy
+
+```{r}
+
+## Matrice corrélation anocratie
+
+wdi_corr_anocracy <- wdi_anocracy %>% 
+  select(corr_vars) %>%
+  drop_na()  # corrélation sur cas complets
+
+GGally::ggcorr(wdi_corr_anocracy,
+  method = c("complete","pearson"),
+  nbreaks = NULL, digits = 3,
+  low = "blue", mid = "white", high = "red",
+  geom = "tile", label = TRUE, label_alpha = FALSE
+)
+
+wdi_corr_anocracy %>% ggplot(aes(y = logCO2, x = logGDP)) + geom_point()
+
+```
+
+## EDA sur wdi_autocracy
+
+```{r}
+
+## Matrice corrélation autocratie
+
+wdi_corr_autocracy <- wdi_autocracy %>% 
+  select(corr_vars) %>%
+  drop_na()  # corrélation sur cas complets
+
+GGally::ggcorr(wdi_corr_autocracy,
+  method = c("complete","pearson"),
+  nbreaks = NULL, digits = 3,
+  low = "blue", mid = "white", high = "red",
+  geom = "tile", label = TRUE, label_alpha = FALSE
+)
+
+wdi_corr_autocracy %>% ggplot(aes(y = logCO2, x = logGDP)) + geom_point()
+
+```
+
+## Analyse comparée des régimes
+
+```{r}
+
+# Boxplots par régime
+bp1 <- ggplot(wdi_with_democracy, aes(regime_, logCO2)) + geom_boxplot() + theme_minimal() +
+  labs(x = NULL, y = "log(CO2)", title = "log(CO2) by regime")
+bp2 <- ggplot(wdi_with_democracy, aes(regime_, logGDP)) + geom_boxplot() + theme_minimal() +
+  labs(x = NULL, y = "log(GDP)", title = "log(GDP) by regime")
+bp4 <- ggplot(wdi_with_democracy, aes(regime_, renewable)) + geom_boxplot() + theme_minimal() +
+  labs(x = NULL, y = "renewable", title = "renewable by regime")
+bp5 <- ggplot(wdi_with_democracy, aes(regime_, rule_of_law)) + geom_boxplot() + theme_minimal() +
+  labs(x = NULL, y = "rule_of_law", title = "rule_of_law by regime")
+bp6 <- ggplot(wdi_with_democracy, aes(regime_, industry)) + geom_boxplot() + theme_minimal() +
+  labs(x = NULL, y = "industry", title = "industry by regime")
+bp7 <- ggplot(wdi_with_democracy, aes(regime_, urban_pop)) + geom_boxplot() + theme_minimal() +
+  labs(x = NULL, y = "urban_pop", title = "urban_pop by regime")
+bp8 <- ggplot(wdi_with_democracy, aes(regime_, oil)) + geom_boxplot() + theme_minimal() +
+  labs(x = NULL, y = "oil", title = "oil by regime")
+
+bp1; bp2; bp4; bp5; bp6; bp7; bp8
+
+```
+
+```{r}
+### Estimation du VIF
+
+library(dplyr)
+library(car)
+
+# 1) Construire les variables "within" (résidus de x ~ FE pays + FE année)
+wfun <- function(v, d) resid(lm(v ~ factor(country) + factor(Time), data = d))
+
+vars <- c("CO2","logGDP","logGDP2","renewable","oil","industry","urban_pop","rule_of_law")
+
+W <- wdi %>%
+  drop_na(all_of(vars)) %>%
+  mutate(
+    W_CO2          = wfun(CO2, .),
+    W_logGDP       = wfun(logGDP, .),
+    W_logGDP2      = wfun(logGDP2, .),
+    W_renewable    = wfun(renewable, .),
+    W_oil          = wfun(oil, .),
+    W_industry     = wfun(industry, .),
+    W_urban_pop    = wfun(urban_pop, .),
+    W_rule_of_law  = wfun(rule_of_law, .)
+  )
+
+# 1) Corrélations within
+W %>% 
+  select(starts_with("W_")) %>% 
+  select(-W_CO2) %>% 
+  cor(use="pairwise.complete.obs")
+
+# 2) Variance within de renewable (si ~0 → problème d’identification)
+sd(W$W_renewable, na.rm = TRUE)
+
+# 3) "VIF FE" : VIF sur les variables within (équivalent au modèle within)
+m_within <- lm(W_CO2 ~ W_logGDP + W_logGDP2 + W_renewable + 
+                         W_oil + W_industry + W_urban_pop + W_rule_of_law - 1, data = W)
+car::vif(m_within)
+```
+
+# Estimation de la EKC
+
+## Estimation de la EKC sur WDI uniquement
+
+### Fixed effects regression (on country and time)
+
+```{r EKC on DWI only}
+
+wdi <- wdi %>% na.omit
+
+regression_fe <- plm(
+  logCO2 ~ logGDP + logGDP2 + 
+    renewable + rule_of_law + industry,
+  data   = wdi,
+  index  = c("country","Time"),
+  model  = "within",
+  effect = "twoways",
+  na.action = na.omit
+)
+summary(regression_fe, vcov. = function(x) vcovSCC(x, type = "HC1", cluster = "group", maxlag = 2))
+tidy(regression_fe)
+glance(regression_fe)
+
+```
+
+### Random effects regression (on country and time)
+
+```{r}
+
+regression_re <- plm(
+  logCO2 ~  logGDP + logGDP2 + 
+    renewable + rule_of_law + industry,
+  data   = wdi,
+  index  = c("country","Time"),
+  model  = "random",
+  effect = "twoways",
+  na.action = na.omit
+)
+summary(regression_re)
+tidy(regression_re)
+glance(regression_re)
+
+```
+
+### Hausman test
+
+```{r}
+
+phtest(regression_fe, regression_re) 
+## Le test de Hausmann permet de rejeter le FE, cependant on note que le RE annule la significativité de tout les coefficients
+## En effet, celui-ci autorise la comparaison inter-pays en disant que les effets individuels ne sont pas corrélés
+## avec les régresseurs.
+
+## Au vu de l'objectif de notre étude, nous souhaitons comparer intra-pays en observant l'évolution des émissions
+## de CO2 lorsque les régresseurs du pays varient. L'approche prudente nous conduit donc à choisir un FE model
+
+```
+
+### Test de Wald
+
+Vérifier que les coefficients different significativement entre les groupes de régimes
+
+```{r}
+
+# Modèle FE commun à tous les régimes (coefficients identiques)
+mod_common <- plm(
+  log(CO2) ~ logGDP + logGDP2 + rule_of_law + industry+renewable,
+  data = wdi_with_democracy, index = c("country","Time"),
+  model = "within", effect = "twoways", na.action = na.omit
+)
+
+# Modèle FE avec coefficients qui peuvent dépendre du régime (interactions)
+mod_byreg <- plm(
+  log(CO2) ~
+    logGDP*regime_ + logGDP2*regime_ + renewable*regime_+
+    rule_of_law*regime_ + industry*regime_,
+  data = wdi_with_democracy, index = c("country","Time"),
+  model = "within", effect = "twoways", na.action = na.omit
+)
+
+# Test de restriction conjointe (H0: les interactions = 0, donc mêmes coefficients entre régimes)
+# On utilise un test de Wald entre modèles emboîtés, avec SE robustes Arellano et clustering par pays
+vcov_arellano <- vcovHC(mod_byreg, method = "arellano", type = "HC1", cluster = "group")
+wald_regime <- waldtest(mod_common, mod_byreg, vcov = vcov_arellano, test = "F")
+wald_regime
+
+## Les résultats indiquent que H0 est rejeté à 5% : les coefficients des régresseurs diffèrent significativement entre les groupes de régimes
+
+```
+
+### Test de Test des hypothèses de Gauss-Markov
+
+#### Breusch-Pagan (Homoscédasticité)
+
+```{r}
+reg_OLS <- lm(log(CO2) ~ logGDP + logGDP2 + oil + rule_of_law + industry, data=wdi)
+
+library(lmtest)
+bptest(
+  log(CO2) ~ logGDP + logGDP2 + oil + rule_of_law + industry,
+  data = wdi
+)
+
+## H0 est rejeté : il y a hétéroscédasticité et on doit utiliser des erreurs standards robustes
+## vcovHC(mod, method="arellano", type="HC1", cluster="group")
+
+```
+
+#### Breusch-Godfrey (Autocorrélation)
+
+```{r}
+
+bgtest(reg_OLS)
+
+### De l'autocorrélation est détectée : on doit utiliser la même méthode qu'au point précédent
+
+```
+
+#### Jarque-Bera (Normalité des résidus)
+
+```{r}
+
+res <- residuals(reg_OLS)
+jarque.bera.test(res)
+
+## Résidus non normaux, même remarque précédement
+
+```
+
+## Estimation de la EKC sur WDI en prenant compte du critère "démocracie"
+
+### Spécifications des modèles
+
+```{r}
+
+### Pour les spécifications des modèles
+
+# Corrélations "between" (moyennes pays)
+betw <- wdi_with_democracy %>% group_by(country) %>%
+  summarise(lGDP_b = mean(logGDP, na.rm=TRUE),
+            rol_b  = mean(renewable, na.rm=TRUE)) %>% ungroup()
+cor_between <- cor(betw$lGDP_b, betw$rol_b, use="complete.obs")
+
+# Corrélations "within" (démoyennées pays)
+demw <- pdata.frame(wdi_with_democracy, index=c("country","Time"))
+lGDP_w <- demw$logGDP - ave(demw$logGDP, demw$country)
+rol_w  <- demw$renewable- ave(demw$renewable, demw$country)
+cor_within <- cor(lGDP_w, rol_w, use="complete.obs")
+
+c(cor_between=cor_between, cor_within=cor_within)
+
+### Comme la corr between est beaucoup plus élevé que la corr within, les FE permettent de réduire une garnde partie de la multicolinéarité (sauf pour urban_po et parfois renewable)
+
+```
+
+### Estimation de la EKC pour les démocracies
+
+```{r}
+
+wdi_democracy <- wdi_democracy %>% na.omit
+
+regression_democracy <- plm(
+  log(CO2) ~  logGDP + logGDP2 + renewable + rule_of_law + industry,
+  data   = wdi_democracy,
+  index  = c("country","Time"),
+  model  = "within",
+  effect = "twoways",
+  na.action = na.omit
+)
+
+######## Regressions robustes
+summary(regression_democracy,
+        vcov. = function(x) vcovSCC(x, type = "HC1", cluster = "group", maxlag = 2))
+
+summary(regression_democracy)
+tidy(regression_democracy)
+glance(regression_democracy)
+
+```
+
+### Estimation de la EKC pour les anocracies
+
+```{r}
+
+wdi_anocracy <- wdi_anocracy %>% na.omit
+
+regression_anocracy <- plm(
+  log(CO2) ~  logGDP + logGDP2 + rule_of_law+ renewable + industry,
+  data   = wdi_anocracy,
+  index  = c("country","Time"),
+  model  = "within",
+  effect = "twoways",
+  na.action = na.omit
+)
+
+######## Regressions robustes
+summary(regression_anocracy,
+        vcov. = function(x) vcovSCC(x, type = "HC1", cluster = "group", maxlag = 2))
+
+summary(regression_anocracy)
+tidy(regression_anocracy)
+glance(regression_anocracy)
+
+```
+
+### Estimation de la EKC pour les autocraties
+
+```{r}
+
+wdi_autocracy <- wdi_autocracy %>% na.omit
+
+regression_autocracy <- plm(
+  log(CO2) ~ logGDP + logGDP2 + rule_of_law+ renewable + industry,
+  data   = wdi_autocracy,
+  index  = c("country","Time"),
+  model  = "within",
+  effect = "twoways",
+  na.action = na.omit
+)
+
+######## Regressions robustes
+summary(regression_autocracy,
+        vcov. = function(x) vcovSCC(x, type = "HC1", cluster = "group", maxlag = 2))
+
+summary(regression_autocracy)
+tidy(regression_autocracy)
+glance(regression_autocracy)
+
+```
+
+### Représentation graphique de la EKC
+
+#### Pour l'ensemble du dataset
+
+```{r}
+
+logGDP_coefficient <- tidy(regression_fe) %>% 
+  filter(term == "logGDP") %>% 
+  pluck("estimate")
+
+logGDP2_coefficient <- tidy(regression_fe) %>% 
+  filter(term == "logGDP2") %>% 
+  pluck("estimate")
+
+ wdi <- wdi %>% 
+  na.omit %>% 
+  arrange(logGDP) %>%
+  mutate(logCO2_residuals = 
+           pluck(arrange(augment(regression_fe), logGDP),".resid"),
+         logCO2_fitted_values = 
+           pluck(arrange(augment(regression_fe), logGDP),".fitted"),
+         logCO2_fitted_curve = logGDP_coefficient*logGDP + logGDP2_coefficient*logGDP2) %>% 
+  select(Time, country, CO2, logGDP, logGDP2, logCO2_fitted_curve, logCO2_fitted_values, logCO2_residuals)
+
+wdi %>% ggplot(aes(x = logGDP, y = logCO2_fitted_curve)) + geom_line()
+
+wdi %>% ggplot(aes(x = logCO2_residuals, y = logCO2_fitted_values)) + geom_point()
+
+wdi %>% ggplot(aes(x = Time, y = logCO2_residuals)) + geom_point()
+
+
+```
+
+#### Pour les démocraties
+
+```{r}
+
+augment(regression_democracy)
+
+logGDP_coefficient_democracy <- tidy(regression_democracy) %>% 
+  filter(term == "logGDP") %>% 
+  pluck("estimate")
+
+logGDP2_coefficient_democracy <- tidy(regression_democracy) %>% 
+  filter(term == "logGDP2") %>% 
+  pluck("estimate")
+
+ wdi_democracy <- wdi_democracy %>% 
+  na.omit %>% 
+  arrange(logGDP) %>%
+  mutate(logCO2_residuals = 
+           pluck(arrange(augment(regression_democracy), logGDP),".resid"),
+         logCO2_fitted_values = 
+           pluck(arrange(augment(regression_democracy), logGDP),".fitted"),
+         logCO2_fitted_curve = logGDP_coefficient_democracy*logGDP + logGDP2_coefficient_democracy*logGDP2) %>% 
+  select(Time, country, CO2, logGDP, logGDP2, logCO2_fitted_curve, logCO2_fitted_values, logCO2_residuals)
+
+wdi_democracy %>% ggplot(aes(x = logGDP, y = logCO2_fitted_curve)) + geom_line()
+
+wdi_democracy %>% ggplot(aes(x = logCO2_residuals, y = logCO2_fitted_values)) + geom_point()
+
+wdi_democracy %>% ggplot(aes(x = Time, y = logCO2_residuals)) + geom_point()
+
+```
+
+#### Pour les anocraties
+
+```{r}
+
+augment(regression_anocracy)
+
+logGDP_coefficient_anocracy <- tidy(regression_anocracy) %>% 
+  filter(term == "logGDP") %>% 
+  pluck("estimate")
+
+logGDP2_coefficient_anocracy <- tidy(regression_anocracy) %>% 
+  filter(term == "logGDP2") %>% 
+  pluck("estimate")
+
+ wdi_anocracy <- wdi_anocracy %>% 
+  na.omit %>% 
+  arrange(logGDP) %>%
+  mutate(logCO2_residuals = 
+           pluck(arrange(augment(regression_anocracy), logGDP),".resid"),
+         logCO2_fitted_values = 
+           pluck(arrange(augment(regression_anocracy), logGDP),".fitted"),
+         logCO2_fitted_curve = logGDP_coefficient_anocracy*logGDP + logGDP2_coefficient_anocracy*logGDP2) %>% 
+  select(Time, country, CO2, logGDP, logGDP2, logCO2_fitted_curve, logCO2_fitted_values, logCO2_residuals)
+
+wdi_anocracy %>% ggplot(aes(x = logGDP, y = logCO2_fitted_curve)) + geom_line()
+
+wdi_anocracy %>% ggplot(aes(x = logCO2_residuals, y = logCO2_fitted_values)) + geom_point()
+
+wdi_anocracy %>% ggplot(aes(x = Time, y = logCO2_residuals)) + geom_point()
+
+```
+
+#### Pour les autocraties
+
+```{r}
+
+augment(regression_autocracy)
+
+logGDP_coefficient_autocracy <- tidy(regression_autocracy) %>% 
+  filter(term == "logGDP") %>% 
+  pluck("estimate")
+
+logGDP2_coefficient_autocracy <- tidy(regression_autocracy) %>% 
+  filter(term == "logGDP2") %>% 
+  pluck("estimate")
+
+ wdi_autocracy <- wdi_autocracy %>% 
+  na.omit %>% 
+  arrange(logGDP) %>%
+  mutate(logCO2_residuals = 
+           pluck(arrange(augment(regression_autocracy), logGDP),".resid"),
+         logCO2_fitted_values = 
+           pluck(arrange(augment(regression_autocracy), logGDP),".fitted"),
+         logCO2_fitted_curve = logGDP_coefficient_autocracy*logGDP + logGDP2_coefficient_autocracy*logGDP2) %>% 
+  select(Time, country, CO2, logGDP, logGDP2, logCO2_fitted_curve, logCO2_fitted_values, logCO2_residuals)
+
+wdi_autocracy %>% ggplot(aes(x = logGDP, y = logCO2_fitted_curve)) + geom_line()
+
+wdi_autocracy %>% ggplot(aes(x = logCO2_residuals, y = logCO2_fitted_values)) + geom_point()
+
+wdi_autocracy %>% ggplot(aes(x = Time, y = logCO2_residuals)) + geom_point()
+
+```
