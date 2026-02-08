@@ -57,6 +57,14 @@ p_load(tidyverse, plm, WDI, readxl, writexl, skimr, naniar, broom, stargazer,
 # The here package automatically detects the project root
 here::i_am("EKC-Political-Regimes-Code.Rmd")
 
+# Consistent color palette for regime types
+regime_colors <- c("democracy" = "darkgreen",
+                   "anocracy"  = "orange",
+                   "autocracy" = "darkred")
+
+# Directory for LaTeX plots
+plots_dir <- here("Latex", "Plots")
+
 # Custom function for nice tables with better scaling
 nice_table <- function(df, caption = NULL) {
   kable(df, booktabs = TRUE, caption = caption, digits = 3) %>%
@@ -252,10 +260,12 @@ Before estimating our models, we explore the relationships between variables and
 ```{r eda-wdi, fig.cap="Relationship between log(CO2) and log(GDP)"}
 na.omit(wdi) %>% pluck("Time") %>% unique %>% sort
 
-wdi %>% ggplot(aes(y = logCO2, x = logGDP)) +
+p <- wdi %>% ggplot(aes(y = logCO2, x = logGDP)) +
   geom_point(alpha = 0.5) +
   labs(x = "log(GDP)", y = "log(CO2)") +
   theme_minimal()
+p
+ggsave(file.path(plots_dir, "Scatterplot_global.png"), p, width = 6, height = 4, dpi = 300)
 
 corr_vars <- c("logCO2", "logGDP", "renewable", "oil", "industry",
                "urban_pop", "rule_of_law", "corruption")
@@ -268,12 +278,14 @@ The scatterplot reveals a positive relationship between log(GDP) and log(CO2), c
 
 ```{r eda-wdi-correlation, fig.cap="Global correlation matrix"}
 ## Global correlation matrix (on selected variables)
-GGally::ggcorr(wdi_corr,
+p <- GGally::ggcorr(wdi_corr,
   method = c("complete", "pearson"),
   nbreaks = NULL, digits = 2,
   low = "blue", mid = "white", high = "red",
   geom = "tile", label = TRUE, label_alpha = FALSE, label_size = 3
 )
+p
+ggsave(file.path(plots_dir, "Correlation_matrix_global.png"), p, width = 6, height = 5, dpi = 300)
 ```
 
 Key observations from the correlation matrix:
@@ -293,20 +305,24 @@ wdi_democracy_corr <- wdi_democracy %>%
   select(all_of(corr_vars)) %>%
   drop_na()
 
-GGally::ggcorr(wdi_democracy_corr,
+p <- GGally::ggcorr(wdi_democracy_corr,
   method = c("complete", "pearson"),
   nbreaks = NULL, digits = 2,
   low = "blue", mid = "white", high = "red",
   geom = "tile", label = TRUE, label_alpha = FALSE, label_size = 3
 )
+p
+ggsave(file.path(plots_dir, "Correlation_matrix_global_democracy.png"), p, width = 6, height = 5, dpi = 300)
 ```
 
 ```{r eda-democracy-scatter, fig.cap="log(CO2) vs log(GDP) for democracies"}
-wdi_democracy_corr %>%
+p <- wdi_democracy_corr %>%
   ggplot(aes(y = logCO2, x = logGDP)) +
   geom_point(alpha = 0.5, color = "darkgreen") +
   labs(x = "log(GDP)", y = "log(CO2)", title = "Democracies") +
   theme_minimal()
+p
+ggsave(file.path(plots_dir, "Scatterplot_democracy.png"), p, width = 6, height = 4, dpi = 300)
 ```
 
 ### Anocracies
@@ -316,20 +332,24 @@ wdi_corr_anocracy <- wdi_anocracy %>%
   select(all_of(corr_vars)) %>%
   drop_na()
 
-GGally::ggcorr(wdi_corr_anocracy,
+p <- GGally::ggcorr(wdi_corr_anocracy,
   method = c("complete", "pearson"),
   nbreaks = NULL, digits = 2,
   low = "blue", mid = "white", high = "red",
   geom = "tile", label = TRUE, label_alpha = FALSE, label_size = 3
 )
+p
+ggsave(file.path(plots_dir, "Correlation_matrix_global_anocracy.png"), p, width = 6, height = 5, dpi = 300)
 ```
 
 ```{r eda-anocracy-scatter, fig.cap="log(CO2) vs log(GDP) for anocracies"}
-wdi_corr_anocracy %>%
+p <- wdi_corr_anocracy %>%
   ggplot(aes(y = logCO2, x = logGDP)) +
   geom_point(alpha = 0.5, color = "orange") +
   labs(x = "log(GDP)", y = "log(CO2)", title = "Anocracies") +
   theme_minimal()
+p
+ggsave(file.path(plots_dir, "Scatterplot_anocracy.png"), p, width = 6, height = 4, dpi = 300)
 ```
 
 ### Autocracies
@@ -339,20 +359,24 @@ wdi_corr_autocracy <- wdi_autocracy %>%
   select(all_of(corr_vars)) %>%
   drop_na()
 
-GGally::ggcorr(wdi_corr_autocracy,
+p <- GGally::ggcorr(wdi_corr_autocracy,
   method = c("complete", "pearson"),
   nbreaks = NULL, digits = 2,
   low = "blue", mid = "white", high = "red",
   geom = "tile", label = TRUE, label_alpha = FALSE, label_size = 3
 )
+p
+ggsave(file.path(plots_dir, "Correlation_matrix_global_autocracy.png"), p, width = 6, height = 5, dpi = 300)
 ```
 
 ```{r eda-autocracy-scatter, fig.cap="log(CO2) vs log(GDP) for autocracies"}
-wdi_corr_autocracy %>%
+p <- wdi_corr_autocracy %>%
   ggplot(aes(y = logCO2, x = logGDP)) +
   geom_point(alpha = 0.5, color = "darkred") +
   labs(x = "log(GDP)", y = "log(CO2)", title = "Autocracies") +
   theme_minimal()
+p
+ggsave(file.path(plots_dir, "Scatterplot_autocracy.png"), p, width = 6, height = 4, dpi = 300)
 ```
 
 The correlation patterns differ notably across regimes. Democracies show a more dispersed relationship, while autocracies exhibit a tighter positive correlation between GDP and CO2. This preliminary evidence suggests that the EKC relationship may indeed vary by regime type.
@@ -360,40 +384,54 @@ The correlation patterns differ notably across regimes. Democracies show a more 
 ## Comparative Distribution Analysis
 
 ```{r boxplots-regimes, fig.width=8, fig.height=10, fig.cap="Distribution of variables by regime type"}
-# Boxplots by regime
+# Boxplots by regime (consistent colors across all figures)
 bp1 <- ggplot(wdi_with_democracy, aes(regime_, logCO2, fill = regime_)) +
   geom_boxplot() + theme_minimal() +
+  scale_fill_manual(values = regime_colors) +
   labs(x = NULL, y = "log(CO2)") +
   theme(legend.position = "none")
 
 bp2 <- ggplot(wdi_with_democracy, aes(regime_, logGDP, fill = regime_)) +
   geom_boxplot() + theme_minimal() +
+  scale_fill_manual(values = regime_colors) +
   labs(x = NULL, y = "log(GDP)") +
   theme(legend.position = "none")
 
 bp4 <- ggplot(wdi_with_democracy, aes(regime_, renewable, fill = regime_)) +
   geom_boxplot() + theme_minimal() +
+  scale_fill_manual(values = regime_colors) +
   labs(x = NULL, y = "Renewable energy") +
   theme(legend.position = "none")
 
 bp5 <- ggplot(wdi_with_democracy, aes(regime_, rule_of_law, fill = regime_)) +
   geom_boxplot() + theme_minimal() +
+  scale_fill_manual(values = regime_colors) +
   labs(x = NULL, y = "Rule of law") +
   theme(legend.position = "none")
 
 bp6 <- ggplot(wdi_with_democracy, aes(regime_, industry, fill = regime_)) +
   geom_boxplot() + theme_minimal() +
+  scale_fill_manual(values = regime_colors) +
   labs(x = NULL, y = "Industry") +
   theme(legend.position = "none")
 
 bp7 <- ggplot(wdi_with_democracy, aes(regime_, urban_pop, fill = regime_)) +
   geom_boxplot() + theme_minimal() +
+  scale_fill_manual(values = regime_colors) +
   labs(x = NULL, y = "Urban population") +
   theme(legend.position = "none")
 
 # Combine plots
 library(gridExtra)
 grid.arrange(bp1, bp2, bp4, bp5, bp6, bp7, ncol = 2)
+
+# Save individual boxplots for LaTeX
+ggsave(file.path(plots_dir, "Boxplot_logCO2_by_regime.png"), bp1, width = 5, height = 4, dpi = 300)
+ggsave(file.path(plots_dir, "Boxplot_logGDP_by_regime.png"), bp2, width = 5, height = 4, dpi = 300)
+ggsave(file.path(plots_dir, "Boxplot_renewable_by_regime.png"), bp4, width = 5, height = 4, dpi = 300)
+ggsave(file.path(plots_dir, "Boxplot_rule_of_law_by_regime.png"), bp5, width = 5, height = 4, dpi = 300)
+ggsave(file.path(plots_dir, "Boxplot_industry_by_regime.png"), bp6, width = 5, height = 4, dpi = 300)
+ggsave(file.path(plots_dir, "Boxplot_urban_pop_by_regime.png"), bp7, width = 5, height = 4, dpi = 300)
 ```
 
 The boxplots reveal important differences across regimes:
@@ -731,12 +769,14 @@ wdi <- wdi %>%
   select(Time, country, CO2, logGDP, logGDP2,
          logCO2_fitted_curve, logCO2_fitted_values, logCO2_residuals)
 
-wdi %>%
+p <- wdi %>%
   ggplot(aes(x = logGDP, y = logCO2_fitted_curve)) +
   geom_line(color = "steelblue", linewidth = 1) +
   labs(x = "log(GDP)", y = "Fitted log(CO2)",
        title = "EKC Curve - Full Dataset") +
   theme_minimal()
+p
+ggsave(file.path(plots_dir, "global.png"), p, width = 6, height = 4, dpi = 300)
 ```
 
 ```{r ekc-residuals-full, fig.cap="Residual diagnostics for full dataset"}
@@ -785,12 +825,14 @@ wdi_democracy <- wdi_democracy %>%
   select(Time, country, CO2, logGDP, logGDP2,
          logCO2_fitted_curve, logCO2_fitted_values, logCO2_residuals)
 
-wdi_democracy %>%
+p <- wdi_democracy %>%
   ggplot(aes(x = logGDP, y = logCO2_fitted_curve)) +
   geom_line(color = "darkgreen", linewidth = 1) +
   labs(x = "log(GDP)", y = "Fitted log(CO2)",
        title = "EKC Curve - Democracies") +
   theme_minimal()
+p
+ggsave(file.path(plots_dir, "democracy.png"), p, width = 6, height = 4, dpi = 300)
 ```
 
 ```{r ekc-residuals-democracies, fig.cap="Residual diagnostics for democracies"}
@@ -834,12 +876,14 @@ wdi_anocracy <- wdi_anocracy %>%
   select(Time, country, CO2, logGDP, logGDP2,
          logCO2_fitted_curve, logCO2_fitted_values, logCO2_residuals)
 
-wdi_anocracy %>%
+p <- wdi_anocracy %>%
   ggplot(aes(x = logGDP, y = logCO2_fitted_curve)) +
   geom_line(color = "orange", linewidth = 1) +
   labs(x = "log(GDP)", y = "Fitted log(CO2)",
        title = "EKC Curve - Anocracies") +
   theme_minimal()
+p
+ggsave(file.path(plots_dir, "anocracy.png"), p, width = 6, height = 4, dpi = 300)
 ```
 
 ```{r ekc-residuals-anocracies, fig.cap="Residual diagnostics for anocracies"}
@@ -883,12 +927,14 @@ wdi_autocracy <- wdi_autocracy %>%
   select(Time, country, CO2, logGDP, logGDP2,
          logCO2_fitted_curve, logCO2_fitted_values, logCO2_residuals)
 
-wdi_autocracy %>%
+p <- wdi_autocracy %>%
   ggplot(aes(x = logGDP, y = logCO2_fitted_curve)) +
   geom_line(color = "darkred", linewidth = 1) +
   labs(x = "log(GDP)", y = "Fitted log(CO2)",
        title = "EKC Curve - Autocracies") +
   theme_minimal()
+p
+ggsave(file.path(plots_dir, "autocracy.png"), p, width = 6, height = 4, dpi = 300)
 ```
 
 ```{r ekc-residuals-autocracies, fig.cap="Residual diagnostics for autocracies"}
@@ -907,6 +953,57 @@ p2 <- wdi_autocracy %>%
   theme_minimal()
 
 grid.arrange(p1, p2, ncol = 2)
+```
+
+## Robustness Check: Anocracies Post-2015
+
+We re-estimate the EKC for anocracies restricting the sample to the post-2015 period, following the Paris Agreement.
+
+```{r ekc-anocracy-post2015, fig.cap="EKC curve for anocracies (2015-2024)"}
+# Reload full WDI without year restriction
+wdi_full <- read_excel(here("Data", "world_development_indicators.xlsx"),
+                       na = c("..", ""))
+wdi_full <- wdi_full %>%
+  rename(country = 2, GDP = 11, CO2 = 10, oil = 9, corruption = 8,
+         renewable = 7, industry = 6, urban_pop = 5, rule_of_law = 12) %>%
+  select(-c(1, 4)) %>%
+  mutate(logCO2 = log(CO2), logGDP = log(GDP), logGDP2 = logGDP^2) %>%
+  select(country, Time, CO2, logCO2, GDP, logGDP, logGDP2,
+         renewable, oil, industry, corruption, urban_pop, rule_of_law)
+
+wdi_full_dem <- wdi_full %>%
+  inner_join(polity2, by = c("country", "Time")) %>%
+  mutate(regime_ = case_when(
+    democracy >= -10 & democracy <= -6 ~ "autocracy",
+    democracy >= -5  & democracy <= 5  ~ "anocracy",
+    democracy >= 6   & democracy <= 10 ~ "democracy"
+  ))
+
+wdi_ano_post2015 <- wdi_full_dem %>%
+  filter(regime_ == "anocracy", Time >= 2015) %>% na.omit()
+
+reg_ano_post <- plm(
+  log(CO2) ~ logGDP + logGDP2 + rule_of_law + renewable + industry,
+  data = wdi_ano_post2015, index = c("country", "Time"),
+  model = "within", effect = "twoways", na.action = na.omit)
+
+coeftest(reg_ano_post, vcov. = robust_vcov) %>%
+  tidy() %>% nice_table(caption = "EKC for anocracies post-2015 (robust SEs)")
+
+b1ap <- tidy(reg_ano_post) %>% filter(term == "logGDP") %>% pluck("estimate")
+b2ap <- tidy(reg_ano_post) %>% filter(term == "logGDP2") %>% pluck("estimate")
+
+wdi_ano_post_plot <- wdi_ano_post2015 %>% arrange(logGDP) %>%
+  mutate(logCO2_fitted_curve = b1ap * logGDP + b2ap * logGDP2)
+
+p <- wdi_ano_post_plot %>%
+  ggplot(aes(x = logGDP, y = logCO2_fitted_curve)) +
+  geom_line(color = "orange", linewidth = 1) +
+  labs(x = "log(GDP)", y = "Fitted log(CO2)",
+       title = "EKC Curve - Anocracies (2015-2024)") +
+  theme_minimal()
+p
+ggsave(file.path(plots_dir, "anopost2015.png"), p, width = 6, height = 4, dpi = 300)
 ```
 
 # Conclusion
