@@ -1,109 +1,42 @@
-# SDG Project - Environmental Kuznets Curve Analysis
+# Does democracy favour green growth? The Environmental Kuznets Curve across political regimes
 
-Econometric analysis of the Environmental Kuznets Curve (EKC) across political regimes.
+Course project for *Programming with Application to SDGs* (M2 International Economics and Development, Paris Dauphine-PSL, 2025), by Alexandre Saint and Keyhan Gelas.
 
-## Description
+We test whether the Environmental Kuznets Curve (EKC), the inverted-U relationship between income and CO2 emissions, differs between democracies, anocracies and autocracies.
 
-This research project examines the relationship between economic development (GDP) and CO2 emissions across different types of political regimes (democracies, anocracies, and autocracies). The objective is to determine whether the Environmental Kuznets Curve (the inverted U-shaped relationship between income and pollution) varies according to a country's political system.
+- **Report:** [`EKC-Political-Regimes-Report.pdf`](EKC-Political-Regimes-Report.pdf)
+- **Code and output:** [`EKC-Political-Regimes-Code.Rmd`](EKC-Political-Regimes-Code.Rmd), rendered in [`EKC-Political-Regimes-Code.pdf`](EKC-Political-Regimes-Code.pdf)
 
-## Authors
+## Data
 
-- Alexandre SAINT
-- Keyhan GELAS
+- **World Development Indicators** (World Bank): CO2 emissions per capita, GDP per capita, renewable energy share, industry value added, urban population, rule of law, corruption.
+- **Polity V** (revised combined polity score, -10 to +10), used to classify countries as democracies (6 to 10), anocracies (-5 to 5) or autocracies (-10 to -6).
 
-## Project Structure
+After merging and cleaning, the panel covers 164 countries over 2000-2018 (3,049 observations). Both raw files are in `Data/`.
+
+## Method
+
+- Two-way fixed effects panel regressions of CO2 emissions per capita on GDP per capita and its square, with controls (rule of law, renewable energy, industry), estimated on the full sample and separately for each regime type.
+- Random effects estimates and specification tests: Hausman, Wald tests of differences between regimes, Breusch-Pagan, Breusch-Godfrey and Jarque-Bera.
+- Driscoll-Kraay and cluster-robust (Arellano) standard errors, and robustness checks on the period and sample.
+
+## Main findings
+
+- An EKC appears in the full sample and among autocracies, but only a few countries, mostly very rich or oil-exporting, actually reach the turning point.
+- In democracies and anocracies the relationship is concave, but the turning point lies beyond observed income levels.
+- Renewable energy lowers emissions in all regimes. The rule of law lowers emissions in democracies but has the opposite sign in authoritarian contexts.
+- After 2015, an EKC emerges more clearly among anocracies, possibly linked to the Paris Agreement.
+
+## Reproducing the analysis
+
+Open `EKC-Political-Regimes-Code.Rmd` in RStudio and knit it to PDF (a LaTeX distribution with XeLaTeX is required). Packages are loaded with `pacman`, and file paths are relative to the project root through `here`. The main packages used are `plm`, `lmtest`, `sandwich`, `tidyverse`, `readxl`, `stargazer` and `kableExtra`.
 
 ```
-SDG Project/
-├── EKC-Political-Regimes-Code.Rmd              # Main analysis (R Markdown)
-├── SDG_Project___Alexandre_et_Keyhan.pdf  # Results document
 ├── Data/
-│   ├── POLITY5_PRC_POLITY2.csv        # Political regime data
-│   └── world_development_indicators.xlsx  # World Bank indicators
+│   ├── POLITY5_PRC_POLITY2.csv
+│   └── world_development_indicators.xlsx
+├── EKC-Political-Regimes-Code.Rmd
+├── EKC-Political-Regimes-Code.pdf
+├── EKC-Political-Regimes-Report.pdf
 └── README.md
 ```
-
-## Data Sources
-
-### POLITY5 (Polity Database)
-- **Source**: World Bank Data360 / Polity Database
-- **Coverage**: 1800-present
-- **Measure**: Revised Combined Polity Score (-10 to +10)
-- **Regime Classification**:
-  - Democracy: score 6 to 10
-  - Anocracy: score -5 to 5
-  - Autocracy: score -10 to -6
-
-### World Development Indicators (World Bank)
-Analyzed indicators:
-- CO2 emissions (metric tons per capita)
-- GDP (log-transformed)
-- Renewable energy (% of total energy)
-- Oil consumption
-- Industrial value (% of GDP)
-- Urban population (% of total population)
-- Rule of law index
-- Corruption perception index
-
-## Methodology
-
-### Analysis Period
-2000-2018 (19 years)
-
-### Econometric Approach
-1. **Fixed effects (FE) panel regression**
-2. **Random effects (RE) panel regression**
-3. **Specification tests**:
-   - Hausman test (FE vs RE)
-   - Wald test (differences between regimes)
-   - Breusch-Pagan test (heteroscedasticity)
-   - Breusch-Godfrey test (autocorrelation)
-   - Jarque-Bera test (residual normality)
-4. **Robust standard errors** (Arellano, SCC)
-
-## Requirements
-
-### R and Required Packages
-
-```r
-install.packages(c(
-  "tidyverse",
-  "plm",
-  "lmtest",
-  "sandwich",
-  "tseries",
-  "WDI",
-  "readxl",
-  "writexl",
-  "skimr",
-  "naniar",
-  "broom",
-  "stargazer",
-  "GGally",
-  "ggplot2",
-  "here",
-  "knitr",
-  "kableExtra",
-  "formatR",
-  "gridExtra",
-  "car"
-))
-```
-
-## Usage
-
-1. Clone the repository
-2. Open `EKC-Political-Regimes-Code.Rmd` in RStudio
-3. Ensure the data files are present in the `Data/` folder
-4. Run the R Markdown document (Knit to HTML)
-
-## Results
-
-The analysis results are available in the generated PDF file. The study examines:
-- The CO2-GDP relationship by political regime type
-- The moderating effect of rule of law, renewable energy, and industrialization
-- The existence and shape of the EKC curve across political systems
-
-## License
-
-Academic project - Educational use
